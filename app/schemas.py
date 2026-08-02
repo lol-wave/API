@@ -14,3 +14,12 @@ class UserResponse(BaseModel):
     email: EmailStr
     created_at: datetime
 
+class UserLogin(BaseModel):
+    login: str
+    password: str
+
+class Token(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    access_token: str
+    token_type: str
