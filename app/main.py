@@ -3,7 +3,7 @@ from . import schemas
 from .database import Base, engine, get_db
 from . import models
 from sqlalchemy.orm import Session
-from .security import ph, create_access_token
+from .security import ph, create_access_token, get_current_user
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -49,3 +49,9 @@ async def login_user(user: schemas.UserLogin, db: Session = Depends(get_db)):
 
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+
+@app.get("/me", response_model=schemas.UserResponse)
+async def me(current_user: models.User = Depends(get_current_user)):
+    return current_user
