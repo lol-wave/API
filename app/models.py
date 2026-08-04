@@ -6,9 +6,9 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    username = Column(
-        String(30),
-        unique=True,
+    full_name = Column(
+        String(50),
+        unique=False,
         nullable=False
     )
     email = Column(
