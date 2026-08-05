@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .database import Base, engine, get_db
 from . import models
 from sqlalchemy.orm import Session
-from .security import create_refresh_token, get_current_refresh_user, ph, create_access_token, get_current_user
+from .security import check_teacher_secret_code, create_refresh_token, get_current_refresh_user, ph, create_access_token, get_current_user
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -35,6 +35,31 @@ async def register_user(user: schemas.UserRegister, db: Session = Depends(get_db
         full_name=user.full_name,
         email=user.email,
         password_hash=ph.hash(user.password)
+    )
+    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return new_user 
+
+
+@app.post("/register-teacher", response_model=schemas.UserResponse, status_code=201)
+async def register_teacher(user: schemas.TeacherRegister, db: Session = Depends(get_db)):
+    check_teacher_secret_code(user.teacher_secret_code)
+    existing_user = db.query(models.User).filter(models.User.email == user.email).first()
+    
+    if existing_user:
+        raise HTTPException(
+    status_code=409,
+    detail="Email already registered."
+)
+
+    new_user = models.User(
+        full_name=user.full_name,
+        email=user.email,
+        password_hash=ph.hash(user.password),
+        teacher=True
     )
     
     db.add(new_user)
@@ -78,3 +103,35 @@ async def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends
     access_token = create_access_token({"sub": str(current_user.id)})
 
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.post("/add-object", response_model=schemas.ObjectResponse, status_code=201)
+async def add_object(object: schemas.ObjectCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    existing_object = db.query(models.Objects).filter(models.Objects.name == object.name).first()
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can add objects."
+        )
+    
+    if existing_object:
+        raise HTTPException(
+            status_code=409,
+            detail="Object with this name already exists."
+        )
+
+    new_object = models.Objects(
+        name=object.name,
+        description=object.description
+    )
+    
+    db.add(new_object)
+    db.commit()
+    db.refresh(new_object)
+
+    return new_object
+
+@app.get("/objects", response_model=list[schemas.ObjectResponse])
+async def get_objects(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    objects = db.query(models.Objects).all()
+    return objects

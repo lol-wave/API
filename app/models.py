@@ -1,5 +1,5 @@
 from .database import Base
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Boolean, Column, Integer, String, DateTime
 from datetime import datetime
 
 class User(Base):
@@ -19,6 +19,28 @@ class User(Base):
     password_hash = Column(
         String(255),
         nullable=False
+    )
+
+    teacher = Column(Boolean, default=False)
+
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
+
+
+class Objects(Base):
+    __tablename__ = "objects"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(
+        String(100),
+        unique=True,
+        nullable=False
+    )
+    description = Column(
+        String(255),
+        nullable=True
     )
     created_at = Column(
         DateTime,

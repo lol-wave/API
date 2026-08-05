@@ -84,3 +84,10 @@ def get_current_refresh_user(token: str = Depends(oauth2_scheme), db: Session = 
 
     return user
 
+def check_teacher_secret_code(secret_code: str):
+    expected_code = os.getenv("TEACHER_SECRET_CODE")
+    if expected_code is None:
+        raise RuntimeError("TEACHER_SECRET_CODE is missing.")
+    if secret_code != expected_code:
+        raise HTTPException(status_code=403, detail="Invalid teacher secret code.")
+
