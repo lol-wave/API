@@ -42,6 +42,12 @@ class Objects(Base):
         String(255),
         nullable=True
     )
+
+    deadline = Column(
+        DateTime,
+        nullable=True
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow

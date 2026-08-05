@@ -122,7 +122,8 @@ async def add_object(object: schemas.ObjectCreate, db: Session = Depends(get_db)
 
     new_object = models.Objects(
         name=object.name,
-        description=object.description
+        description=object.description,
+        deadline=object.deadline
     )
     
     db.add(new_object)

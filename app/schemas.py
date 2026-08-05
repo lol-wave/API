@@ -38,6 +38,7 @@ class AccessToken(BaseModel):
 class ObjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(None, max_length=255)
+    deadline: datetime | None = Field(None)
 
 class ObjectResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -45,4 +46,5 @@ class ObjectResponse(BaseModel):
     id: int
     name: str
     description: str | None
+    deadline: datetime | None
     created_at: datetime
