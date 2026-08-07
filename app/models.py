@@ -20,6 +20,7 @@ class User(Base):
         String(255),
         nullable=False
     )
+    profile_pic = Column(String, unique=True, index=True)
 
     teacher = Column(Boolean, default=False)
 

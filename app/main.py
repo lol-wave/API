@@ -1,10 +1,38 @@
-from fastapi import Depends, FastAPI, HTTPException, Response, Cookie
+from fastapi import Depends, FastAPI, HTTPException, Response, Cookie, UploadFile, File
 from . import schemas
 from fastapi.middleware.cors import CORSMiddleware
 from .database import Base, engine, get_db
 from . import models
 from sqlalchemy.orm import Session
 from .security import check_teacher_secret_code, create_refresh_token, get_current_refresh_user, ph, create_access_token, get_current_user
+import os
+import uuid
+from fastapi import UploadFile, File, Depends, HTTPException
+from sqlalchemy.orm import Session
+from fastapi.staticfiles import StaticFiles
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -15,6 +43,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory="uploads"),
+    name="uploads"
 )
 
 @app.get("/")
@@ -136,3 +170,39 @@ async def add_object(object: schemas.ObjectCreate, db: Session = Depends(get_db)
 async def get_objects(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     objects = db.query(models.Objects).all()
     return objects
+
+@app.post("/users/me/avatar", response_model=schemas.UserResponse)
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    allowed_types = {
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    }
+
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="Only JPEG, PNG, and WebP images are allowed."
+        )
+
+    extension = file.filename.split(".")[-1].lower()
+    filename = f"{uuid.uuid4()}.{extension}"
+
+    upload_dir = "uploads/avatars"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    file_path = os.path.join(upload_dir, filename)
+
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+
+    current_user.profile_pic = f"/uploads/avatars/{filename}"
+
+    db.commit()
+    db.refresh(current_user)
+
+    return current_user

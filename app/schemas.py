@@ -20,6 +20,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     created_at: datetime
     teacher: bool
+    profile_pic: str | None = None
 
 class UserLogin(BaseModel):
     email: EmailStr
