@@ -206,3 +206,24 @@ async def upload_avatar(
     db.refresh(current_user)
 
     return current_user
+
+@app.get("/object/{item_id}", response_model=schemas.ObjectResponse)
+async def get_single_object(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
+    select_object= db.query(models.Objects).filter(models.Objects.id == item_id).first()
+    return select_object
+
+@app.post("/object/{item_id}/submit", response_model=schemas.ObjectResponse)
+async def submit_object(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
+    select_object = db.query(models.Objects).filter(models.Objects.id == item_id).first()
+    if select_object.submitted == True:
+        raise HTTPException(
+            status_code=403,
+            detail="The task is already submitted"
+        )
+    select_object.submitted=True
+
+    db.commit()
+    db.refresh(select_object)
+
+    return select_object
+

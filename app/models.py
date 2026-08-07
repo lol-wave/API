@@ -49,6 +49,10 @@ class Objects(Base):
         nullable=True
     )
 
+    submitted = Column(
+        Boolean, default=False
+    )
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow

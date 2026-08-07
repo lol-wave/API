@@ -48,4 +48,5 @@ class ObjectResponse(BaseModel):
     name: str
     description: str | None
     deadline: datetime | None
+    submitted: bool 
     created_at: datetime
