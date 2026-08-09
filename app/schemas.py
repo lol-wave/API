@@ -37,6 +37,14 @@ class AccessToken(BaseModel):
     access_token: str
     token_type: str
 
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(None, min_length=3, max_length=50)
+    email: EmailStr | None = None
+
+class UserPasswordUpdate(BaseModel):
+    current_password: str = Field(..., min_length=8, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
 class ObjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(None, max_length=255)

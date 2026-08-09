@@ -131,6 +131,45 @@ async def login_user(user: schemas.UserLogin, response: Response, db: Session = 
 async def me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
+@app.patch("/users/me", response_model=schemas.UserResponse)
+async def update_profile(
+    update: schemas.UserUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if update.full_name is not None:
+        current_user.full_name = update.full_name
+
+    if update.email is not None and update.email != current_user.email:
+        existing_user = db.query(models.User).filter(models.User.email == update.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=409,
+                detail="Email already registered."
+            )
+        current_user.email = update.email
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+@app.post("/users/me/password", response_model=schemas.UserResponse)
+async def change_password(
+    passwords: schemas.UserPasswordUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not ph.verify(passwords.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=401,
+            detail="Current password is incorrect."
+        )
+
+    current_user.password_hash = ph.hash(passwords.new_password)
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
 @app.post("/refresh", response_model=schemas.AccessToken)
 async def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends(get_db)):
     current_user = get_current_refresh_user(refresh_token, db)
