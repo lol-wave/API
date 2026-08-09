@@ -157,7 +157,8 @@ async def add_object(object: schemas.ObjectCreate, db: Session = Depends(get_db)
     new_object = models.Objects(
         name=object.name,
         description=object.description,
-        deadline=object.deadline
+        deadline=object.deadline,
+        group_id=object.group_id
     )
     
     db.add(new_object)
@@ -226,4 +227,41 @@ async def submit_object(item_id: int, current_user: models.User = Depends(get_cu
     db.refresh(select_object)
 
     return select_object
+
+
+@app.post("/create-group", response_model=schemas.GroupResponse, status_code=201)
+async def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    existing_group = db.query(models.Groups).filter(models.Groups.name == group.name).first()
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can create groups."
+        )
+
+    if existing_group:
+        raise HTTPException(
+            status_code=409,
+            detail="Group with this name already exists."
+        )
+
+    new_group = models.Groups(
+        name=group.name,
+        description=group.description
+    )
+    
+    db.add(new_group)
+    db.commit()
+    db.refresh(new_group)
+
+    return new_group
+
+@app.get("/groups", response_model=list[schemas.GroupResponse])
+async def get_groups(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    groups = db.query(models.Groups).all()
+    return groups
+
+@app.get("/group/{item_id}", response_model=schemas.GroupResponse)
+async def get_single_group(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
+    select_group= db.query(models.Groups).filter(models.Groups.id == item_id).first()
+    return select_group
 

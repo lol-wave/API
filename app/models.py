@@ -1,5 +1,6 @@
 from .database import Base
-from sqlalchemy import Boolean, Column, Integer, String, DateTime
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 
 class User(Base):
@@ -23,6 +24,12 @@ class User(Base):
     profile_pic = Column(String, unique=True, index=True)
 
     teacher = Column(Boolean, default=False)
+
+    group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="SET NULL"),
+        nullable=True
+    )
 
     created_at = Column(
         DateTime,
@@ -53,7 +60,31 @@ class Objects(Base):
         Boolean, default=False
     )
 
+    group_id = Column(
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    group = relationship("Groups", back_populates="objects")
+
     created_at = Column(
         DateTime,
         default=datetime.utcnow
     )
+
+class Groups(Base):
+    __tablename__ = "groups"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(
+        String(100),
+        unique=True,
+        nullable=False
+    )
+    description = Column(
+        String(255),
+        nullable=True
+    )
+    objects = relationship("Objects", back_populates="group")
+
+
