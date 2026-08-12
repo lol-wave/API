@@ -1,7 +1,19 @@
 from .database import Base
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table
 from sqlalchemy.orm import relationship
 from datetime import datetime
+
+user_notifications = Table(
+    "user_notifications",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id"), primary_key=True),
+    Column("notification_id", ForeignKey("notifications.id"), primary_key=True),
+    Column("is_read", Boolean, default=False, nullable=False)
+)
+
+
+
+
 
 class User(Base):
     __tablename__ = "users"
@@ -34,6 +46,12 @@ class User(Base):
     created_at = Column(
         DateTime,
         default=datetime.utcnow
+    )
+
+    notifications = relationship(
+        "Notification",
+        secondary=user_notifications,
+        back_populates="users"
     )
 
 
@@ -87,4 +105,18 @@ class Groups(Base):
     )
     objects = relationship("Objects", back_populates="group")
 
+class Notification(Base):
+    __tablename__ = "notifications"
 
+    id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String, nullable=True)
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
+    users = relationship(
+        "User",
+        secondary=user_notifications,
+        back_populates="notifications"
+    )

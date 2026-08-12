@@ -11,28 +11,6 @@ from fastapi import UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.staticfiles import StaticFiles
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
