@@ -1,5 +1,5 @@
 from .database import Base
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -8,11 +8,9 @@ user_notifications = Table(
     Base.metadata,
     Column("user_id", ForeignKey("users.id"), primary_key=True),
     Column("notification_id", ForeignKey("notifications.id"), primary_key=True),
-    Column("is_read", Boolean, default=False, nullable=False)
+    Column("is_read", Boolean, default=False, nullable=False),
+    Column("read_at", DateTime, nullable=True)
 )
-
-
-
 
 
 class User(Base):
@@ -36,18 +34,28 @@ class User(Base):
     profile_pic = Column(String, unique=True, index=True)
 
     teacher = Column(Boolean, default=False)
-
+    
     group_id = Column(
         Integer,
         ForeignKey("groups.id", ondelete="SET NULL"),
         nullable=True
     )
+    
+    is_group_admin = Column(Boolean, default=False)
 
     created_at = Column(
         DateTime,
         default=datetime.utcnow
     )
+    
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
 
+    group = relationship("Groups", back_populates="members", foreign_keys=[group_id])
+    
     notifications = relationship(
         "Notification",
         secondary=user_notifications,
@@ -89,6 +97,13 @@ class Objects(Base):
         DateTime,
         default=datetime.utcnow
     )
+    
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+
 
 class Groups(Base):
     __tablename__ = "groups"
@@ -103,18 +118,43 @@ class Groups(Base):
         String(255),
         nullable=True
     )
-    objects = relationship("Objects", back_populates="group")
+    
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow
+    )
+    
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+    
+    objects = relationship("Objects", back_populates="group", cascade="all, delete-orphan")
+    members = relationship("User", back_populates="group", cascade="all")
+
 
 class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    description = Column(String, nullable=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    notification_type = Column(String(50), nullable=False, default="info")  # info, warning, error, success
+    icon_url = Column(String, nullable=True)
+    
     created_at = Column(
         DateTime,
-        default=datetime.utcnow
+        default=datetime.utcnow,
+        index=True
     )
+    
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow
+    )
+    
     users = relationship(
         "User",
         secondary=user_notifications,

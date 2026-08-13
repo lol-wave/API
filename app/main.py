@@ -10,6 +10,7 @@ import uuid
 from fastapi import UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.staticfiles import StaticFiles
+from datetime import datetime
 
 Base.metadata.create_all(bind=engine)
 
@@ -277,8 +278,510 @@ async def get_groups(db: Session = Depends(get_db), current_user: models.User = 
     groups = db.query(models.Groups).all()
     return groups
 
-@app.get("/group/{item_id}", response_model=schemas.GroupResponse)
+@app.get("/group/{item_id}", response_model=schemas.GroupDetailResponse)
 async def get_single_group(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
-    select_group= db.query(models.Groups).filter(models.Groups.id == item_id).first()
+    select_group = db.query(models.Groups).filter(models.Groups.id == item_id).first()
+    if not select_group:
+        raise HTTPException(
+            status_code=404,
+            detail="Group not found."
+        )
     return select_group
+
+# ============ Group Management Endpoints ============
+
+@app.post("/group/{group_id}/members", response_model=schemas.UserMemberResponse, status_code=201)
+async def add_user_to_group(
+    group_id: int,
+    request: schemas.AddUserToGroupRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Add a user to a group (teacher/admin only)"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can add users to groups."
+        )
+    
+    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
+    if not group:
+        raise HTTPException(
+            status_code=404,
+            detail="Group not found."
+        )
+    
+    user = db.query(models.User).filter(models.User.id == request.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found."
+        )
+    
+    if user.group_id == group_id:
+        raise HTTPException(
+            status_code=409,
+            detail="User is already in this group."
+        )
+    
+    user.group_id = group_id
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+@app.delete("/group/{group_id}/members/{user_id}", status_code=204)
+async def remove_user_from_group(
+    group_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Remove a user from a group (teacher/admin only)"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can remove users from groups."
+        )
+    
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found."
+        )
+    
+    if user.group_id != group_id:
+        raise HTTPException(
+            status_code=404,
+            detail="User is not in this group."
+        )
+    
+    user.group_id = None
+    user.is_group_admin = False
+    db.commit()
+
+@app.get("/group/{group_id}/members", response_model=list[schemas.UserMemberResponse])
+async def get_group_members(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get all members of a group"""
+    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
+    if not group:
+        raise HTTPException(
+            status_code=404,
+            detail="Group not found."
+        )
+    
+    members = db.query(models.User).filter(models.User.group_id == group_id).all()
+    return members
+
+@app.get("/me/group", response_model=schemas.GroupDetailResponse)
+async def get_current_user_group(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get current user's group"""
+    if not current_user.group_id:
+        raise HTTPException(
+            status_code=404,
+            detail="User is not in any group."
+        )
+    
+    group = db.query(models.Groups).filter(models.Groups.id == current_user.group_id).first()
+    if not group:
+        raise HTTPException(
+            status_code=404,
+            detail="Group not found."
+        )
+    
+    return group
+
+@app.patch("/group/{group_id}", response_model=schemas.GroupResponse)
+async def update_group(
+    group_id: int,
+    update: schemas.GroupUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Update group details (teacher/admin only)"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can update groups."
+        )
+    
+    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
+    if not group:
+        raise HTTPException(
+            status_code=404,
+            detail="Group not found."
+        )
+    
+    if update.name is not None:
+        existing_group = db.query(models.Groups).filter(
+            models.Groups.name == update.name,
+            models.Groups.id != group_id
+        ).first()
+        if existing_group:
+            raise HTTPException(
+                status_code=409,
+                detail="Group name already exists."
+            )
+        group.name = update.name
+    
+    if update.description is not None:
+        group.description = update.description
+    
+    db.commit()
+    db.refresh(group)
+    return group
+
+@app.delete("/group/{group_id}", status_code=204)
+async def delete_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Delete a group (teacher only)"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can delete groups."
+        )
+    
+    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
+    if not group:
+        raise HTTPException(
+            status_code=404,
+            detail="Group not found."
+        )
+    
+    db.delete(group)
+    db.commit()
+
+@app.post("/group/{group_id}/members/{user_id}/admin", response_model=schemas.UserMemberResponse)
+async def promote_user_to_group_admin(
+    group_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Promote a user to group admin (teacher only)"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can promote users to admin."
+        )
+    
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found."
+        )
+    
+    if user.group_id != group_id:
+        raise HTTPException(
+            status_code=404,
+            detail="User is not in this group."
+        )
+    
+    if user.is_group_admin:
+        raise HTTPException(
+            status_code=409,
+            detail="User is already a group admin."
+        )
+    
+    user.is_group_admin = True
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+@app.delete("/group/{group_id}/members/{user_id}/admin", response_model=schemas.UserMemberResponse)
+async def demote_group_admin(
+    group_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Demote a group admin back to regular member (teacher only)"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can demote admins."
+        )
+    
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found."
+        )
+    
+    if user.group_id != group_id:
+        raise HTTPException(
+            status_code=404,
+            detail="User is not in this group."
+        )
+    
+    if not user.is_group_admin:
+        raise HTTPException(
+            status_code=409,
+            detail="User is not a group admin."
+        )
+    
+    user.is_group_admin = False
+    db.commit()
+    db.refresh(user)
+    
+    return user
+
+# ============ Notification System Endpoints ============
+
+@app.post("/notifications", response_model=schemas.NotificationResponse, status_code=201)
+async def create_notification(
+    notification: schemas.NotificationCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Create a new notification (teacher/admin only)"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can create notifications."
+        )
+    
+    new_notification = models.Notification(
+        title=notification.title,
+        description=notification.description,
+        notification_type=notification.notification_type,
+        icon_url=notification.icon_url
+    )
+    
+    db.add(new_notification)
+    db.flush()
+    
+    # Add users to notification
+    if notification.user_ids:
+        users = db.query(models.User).filter(models.User.id.in_(notification.user_ids)).all()
+        new_notification.users.extend(users)
+    
+    db.commit()
+    db.refresh(new_notification)
+    
+    return new_notification
+
+@app.post("/notifications/bulk", response_model=schemas.NotificationResponse, status_code=201)
+async def create_bulk_notification(
+    notification: schemas.BulkNotificationCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Create notification for all users in a group or all users"""
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can create notifications."
+        )
+    
+    new_notification = models.Notification(
+        title=notification.title,
+        description=notification.description,
+        notification_type=notification.notification_type,
+        icon_url=notification.icon_url
+    )
+    
+    db.add(new_notification)
+    db.flush()
+    
+    if notification.group_id:
+        # Add all users in the group
+        group_users = db.query(models.User).filter(models.User.group_id == notification.group_id).all()
+        if not group_users:
+            raise HTTPException(
+                status_code=404,
+                detail="Group not found or has no members."
+            )
+        new_notification.users.extend(group_users)
+    else:
+        # Add all users
+        all_users = db.query(models.User).all()
+        new_notification.users.extend(all_users)
+    
+    db.commit()
+    db.refresh(new_notification)
+    
+    return new_notification
+
+@app.get("/notifications", response_model=list[schemas.UserNotificationResponse])
+async def get_user_notifications(
+    skip: int = 0,
+    limit: int = 50,
+    is_read: bool | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get notifications for current user with optional filtering"""
+    query = db.query(
+        models.Notification,
+        models.user_notifications.c.is_read,
+        models.user_notifications.c.read_at
+    ).join(
+        models.user_notifications,
+        models.Notification.id == models.user_notifications.c.notification_id
+    ).filter(
+        models.user_notifications.c.user_id == current_user.id
+    )
+    
+    if is_read is not None:
+        query = query.filter(models.user_notifications.c.is_read == is_read)
+    
+    notifications = query.order_by(models.Notification.created_at.desc()).offset(skip).limit(limit).all()
+    
+    result = []
+    for notification, is_read_value, read_at in notifications:
+        notification_dict = {
+            'id': notification.id,
+            'title': notification.title,
+            'description': notification.description,
+            'notification_type': notification.notification_type,
+            'icon_url': notification.icon_url,
+            'is_read': is_read_value,
+            'read_at': read_at,
+            'created_at': notification.created_at
+        }
+        result.append(notification_dict)
+    
+    return result
+
+@app.get("/notifications/unread-count", response_model=dict)
+async def get_unread_notification_count(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get count of unread notifications for current user"""
+    unread_count = db.query(models.user_notifications).filter(
+        models.user_notifications.c.user_id == current_user.id,
+        models.user_notifications.c.is_read == False
+    ).count()
+    
+    return {"unread_count": unread_count}
+
+@app.patch("/notifications/{notification_id}", response_model=schemas.UserNotificationResponse)
+async def mark_notification_as_read(
+    notification_id: int,
+    update: schemas.NotificationUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Mark a notification as read or unread for current user"""
+    notification = db.query(models.Notification).filter(models.Notification.id == notification_id).first()
+    if not notification:
+        raise HTTPException(
+            status_code=404,
+            detail="Notification not found."
+        )
+    
+    # Check if user has this notification
+    user_notif = db.query(models.user_notifications).filter(
+        models.user_notifications.c.user_id == current_user.id,
+        models.user_notifications.c.notification_id == notification_id
+    ).first()
+    
+    if not user_notif:
+        raise HTTPException(
+            status_code=404,
+            detail="User does not have access to this notification."
+        )
+    
+    if update.is_read is not None:
+        db.query(models.user_notifications).filter(
+            models.user_notifications.c.user_id == current_user.id,
+            models.user_notifications.c.notification_id == notification_id
+        ).update({
+            models.user_notifications.c.is_read: update.is_read,
+            models.user_notifications.c.read_at: datetime.utcnow() if update.is_read else None
+        })
+    
+    db.commit()
+    
+    # Fetch updated notification
+    updated_notif = db.query(
+        models.Notification,
+        models.user_notifications.c.is_read,
+        models.user_notifications.c.read_at
+    ).join(
+        models.user_notifications,
+        models.Notification.id == models.user_notifications.c.notification_id
+    ).filter(
+        models.user_notifications.c.user_id == current_user.id,
+        models.Notification.id == notification_id
+    ).first()
+    
+    notification, is_read_value, read_at = updated_notif
+    
+    return {
+        'id': notification.id,
+        'title': notification.title,
+        'description': notification.description,
+        'notification_type': notification.notification_type,
+        'icon_url': notification.icon_url,
+        'is_read': is_read_value,
+        'read_at': read_at,
+        'created_at': notification.created_at
+    }
+
+@app.delete("/notifications/{notification_id}", status_code=204)
+async def delete_notification_for_user(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Remove a notification from current user's list"""
+    notification = db.query(models.Notification).filter(models.Notification.id == notification_id).first()
+    if not notification:
+        raise HTTPException(
+            status_code=404,
+            detail="Notification not found."
+        )
+    
+    # Remove user from notification's users
+    user_notif = db.query(models.user_notifications).filter(
+        models.user_notifications.c.user_id == current_user.id,
+        models.user_notifications.c.notification_id == notification_id
+    ).first()
+    
+    if not user_notif:
+        raise HTTPException(
+            status_code=404,
+            detail="User does not have this notification."
+        )
+    
+    db.query(models.user_notifications).filter(
+        models.user_notifications.c.user_id == current_user.id,
+        models.user_notifications.c.notification_id == notification_id
+    ).delete()
+    
+    db.commit()
+
+@app.delete("/notifications", status_code=204)
+async def clear_all_notifications(
+    is_read: bool | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Clear all notifications for current user (optionally by read status)"""
+    query = db.query(models.user_notifications).filter(
+        models.user_notifications.c.user_id == current_user.id
+    )
+    
+    if is_read is not None:
+        query = query.filter(models.user_notifications.c.is_read == is_read)
+    
+    query.delete()
+    db.commit()
 
