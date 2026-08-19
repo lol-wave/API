@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl
 from datetime import datetime
 
 # ============ User Schemas ============
@@ -74,8 +74,28 @@ class ObjectResponse(BaseModel):
     deadline: datetime | None
     group_id: int
     submitted: bool 
+    homework_url: HttpUrl | None
     created_at: datetime
     updated_at: datetime
+
+class ObjectSubmission(BaseModel):
+    url: HttpUrl
+
+class HomeworkSubmissionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    object_id: int
+    student_id: int
+    url: HttpUrl
+    grade: int | None
+    feedback: str | None
+    submitted_at: datetime
+    graded_at: datetime | None
+
+class HomeworkGrade(BaseModel):
+    grade: int = Field(..., ge=0, le=100)
+    feedback: str | None = Field(None, max_length=2000)
 
 # ============ Group Schemas ============
 class GroupCreate(BaseModel):

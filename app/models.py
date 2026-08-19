@@ -1,5 +1,5 @@
 from .database import Base
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table, Text
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -62,6 +62,12 @@ class User(Base):
         back_populates="users"
     )
 
+    homework_submissions = relationship(
+        "HomeworkSubmission",
+        back_populates="student",
+        cascade="all, delete-orphan"
+    )
+
 
 class Objects(Base):
     __tablename__ = "objects"
@@ -86,6 +92,10 @@ class Objects(Base):
         Boolean, default=False
     )
 
+    homework_url = Column(
+        String(2048), nullable=True
+    )
+
     group_id = Column(
         ForeignKey("groups.id", ondelete="CASCADE"),
         nullable=False
@@ -103,6 +113,31 @@ class Objects(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow
     )
+
+    submissions = relationship(
+        "HomeworkSubmission",
+        back_populates="object",
+        cascade="all, delete-orphan"
+    )
+
+
+class HomeworkSubmission(Base):
+    __tablename__ = "homework_submissions"
+    __table_args__ = (
+        UniqueConstraint("object_id", "student_id", name="uq_homework_submission_student_object"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    object_id = Column(Integer, ForeignKey("objects.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    url = Column(String(2048), nullable=False)
+    grade = Column(Integer, nullable=True)
+    feedback = Column(Text, nullable=True)
+    submitted_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    graded_at = Column(DateTime, nullable=True)
+
+    object = relationship("Objects", back_populates="submissions")
+    student = relationship("User", back_populates="homework_submissions")
 
 
 class Groups(Base):

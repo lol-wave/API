@@ -1,7 +1,7 @@
 from fastapi import Depends, FastAPI, HTTPException, Response, Cookie, UploadFile, File
 from . import schemas
 from fastapi.middleware.cors import CORSMiddleware
-from .database import Base, engine, get_db
+from .database import Base, engine, get_db, add_missing_columns
 from . import models
 from sqlalchemy.orm import Session
 from .security import check_teacher_secret_code, create_refresh_token, get_current_refresh_user, ph, create_access_token, get_current_user
@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 
 Base.metadata.create_all(bind=engine)
+add_missing_columns()
 
 app = FastAPI()
 
@@ -231,20 +232,92 @@ async def get_single_object(item_id: int, current_user: models.User = Depends(ge
     select_object= db.query(models.Objects).filter(models.Objects.id == item_id).first()
     return select_object
 
-@app.post("/object/{item_id}/submit", response_model=schemas.ObjectResponse)
-async def submit_object(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
+@app.post("/object/{item_id}/submit", response_model=schemas.HomeworkSubmissionResponse, status_code=201)
+async def submit_object(
+    item_id: int,
+    submission: schemas.ObjectSubmission,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     select_object = db.query(models.Objects).filter(models.Objects.id == item_id).first()
-    if select_object.submitted == True:
+    if not select_object:
+        raise HTTPException(
+            status_code=404,
+            detail="Object not found."
+        )
+    if current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only students can submit homework."
+        )
+    existing_submission = db.query(models.HomeworkSubmission).filter(
+        models.HomeworkSubmission.object_id == item_id,
+        models.HomeworkSubmission.student_id == current_user.id
+    ).first()
+    if existing_submission:
         raise HTTPException(
             status_code=403,
             detail="The task is already submitted"
         )
-    select_object.submitted=True
+
+    homework_submission = models.HomeworkSubmission(
+        object_id=item_id,
+        student_id=current_user.id,
+        url=str(submission.url)
+    )
+    db.add(homework_submission)
 
     db.commit()
-    db.refresh(select_object)
+    db.refresh(homework_submission)
 
-    return select_object
+    return homework_submission
+
+
+@app.get("/teacher/homework", response_model=list[schemas.HomeworkSubmissionResponse])
+async def get_homework_submissions(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can view homework submissions."
+        )
+
+    return db.query(models.HomeworkSubmission).order_by(
+        models.HomeworkSubmission.submitted_at.desc()
+    ).all()
+
+
+@app.patch("/teacher/homework/{submission_id}/grade", response_model=schemas.HomeworkSubmissionResponse)
+async def grade_homework(
+    submission_id: int,
+    grading: schemas.HomeworkGrade,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not current_user.teacher:
+        raise HTTPException(
+            status_code=403,
+            detail="Only teachers can grade homework."
+        )
+
+    homework_submission = db.query(models.HomeworkSubmission).filter(
+        models.HomeworkSubmission.id == submission_id
+    ).first()
+    if not homework_submission:
+        raise HTTPException(
+            status_code=404,
+            detail="Homework submission not found."
+        )
+
+    homework_submission.grade = grading.grade
+    homework_submission.feedback = grading.feedback
+    homework_submission.graded_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(homework_submission)
+    return homework_submission
 
 
 @app.post("/create-group", response_model=schemas.GroupResponse, status_code=201)

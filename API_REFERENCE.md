@@ -327,12 +327,43 @@ Response: ObjectResponse
 
 ```http
 POST /object/{item_id}/submit
-Response: ObjectResponse
+Content-Type: application/json
+
+{
+  "url": "https://example.com/homework/assignment-1"
+}
+
+Response: HomeworkSubmissionResponse (201)
 {
     "id": 1,
-    "submitted": true,
+    "object_id": 1,
+    "student_id": 7,
+    "url": "https://example.com/homework/assignment-1",
+    "grade": null,
+    "feedback": null,
     ...
 }
+```
+
+### Teacher Homework Inbox
+
+```http
+GET /teacher/homework
+Response: list[HomeworkSubmissionResponse]
+```
+
+### Grade Homework
+
+```http
+PATCH /teacher/homework/{submission_id}/grade
+Content-Type: application/json
+
+{
+    "grade": 92,
+    "feedback": "Clear explanation and good evidence."
+}
+
+Response: HomeworkSubmissionResponse
 ```
 
 ---
