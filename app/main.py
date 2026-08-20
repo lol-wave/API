@@ -273,6 +273,18 @@ async def submit_object(
     return homework_submission
 
 
+@app.get("/me/homework", response_model=list[schemas.MyHomeworkResponse])
+async def get_my_homework(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.HomeworkSubmission).filter(
+        models.HomeworkSubmission.student_id == current_user.id
+    ).order_by(
+        models.HomeworkSubmission.submitted_at.desc()
+    ).all()
+
+
 @app.get("/teacher/homework", response_model=list[schemas.HomeworkSubmissionResponse])
 async def get_homework_submissions(
     current_user: models.User = Depends(get_current_user),

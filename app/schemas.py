@@ -93,6 +93,9 @@ class HomeworkSubmissionResponse(BaseModel):
     submitted_at: datetime
     graded_at: datetime | None
 
+class MyHomeworkResponse(HomeworkSubmissionResponse):
+    homework: ObjectResponse
+
 class HomeworkGrade(BaseModel):
     grade: int = Field(..., ge=0, le=100)
     feedback: str | None = Field(None, max_length=2000)

@@ -345,6 +345,36 @@ Response: HomeworkSubmissionResponse (201)
 }
 ```
 
+### My Submitted Homework
+
+```http
+GET /me/homework
+Response: list[MyHomeworkResponse]
+[
+  {
+    "id": 1,
+    "object_id": 1,
+    "student_id": 7,
+    "url": "https://example.com/homework/assignment-1",
+    "grade": 92,
+    "feedback": "Clear explanation and good evidence.",
+    "submitted_at": "2024-01-20T10:30:00",
+    "graded_at": "2024-01-21T14:00:00",
+    "homework": {
+      "id": 1,
+      "name": "Assignment 1",
+      "description": "Physics homework",
+      "deadline": "2024-02-01T23:59:59",
+      "group_id": 1,
+      "submitted": false,
+      "homework_url": null,
+      "created_at": "2024-01-15T10:30:00",
+      "updated_at": "2024-01-15T10:30:00"
+    }
+  }
+]
+```
+
 ### Teacher Homework Inbox
 
 ```http
