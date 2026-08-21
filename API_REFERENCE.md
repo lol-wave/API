@@ -10,6 +10,51 @@ http://localhost:8000
 
 All endpoints require `Authorization: Bearer {access_token}` header (except login/register).
 
+## USER AND ATTENDANCE ENDPOINTS
+
+### Delete Current User
+
+```http
+DELETE /users/me
+Response: 204 No Content
+```
+
+### Record Lesson Attendance (Teacher Only)
+
+```http
+POST /lessons/{lesson_id}/attendance
+Content-Type: application/json
+
+{
+  "student_id": 5,
+  "status": "present"
+}
+
+Response: AttendanceResponse (201)
+```
+
+`status` must be `present`, `absent`, or `late`. Each student can have one attendance record per lesson.
+
+### Get Lesson Attendance
+
+```http
+GET /lessons/{lesson_id}/attendance
+Response: list[AttendanceResponse]
+```
+
+### Update Attendance (Teacher Only)
+
+```http
+PATCH /attendance/{attendance_id}
+Content-Type: application/json
+
+{
+  "status": "late"
+}
+
+Response: AttendanceResponse
+```
+
 ---
 
 ## GROUP MANAGEMENT ENDPOINTS

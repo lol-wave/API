@@ -134,6 +134,24 @@ async def update_profile(
     db.refresh(current_user)
     return current_user
 
+@app.delete("/users/me", status_code=204)
+async def delete_current_user(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    db.query(models.user_notifications).filter(
+        models.user_notifications.c.user_id == current_user.id
+    ).delete()
+    db.query(models.StudentRating).filter(
+        (models.StudentRating.teacher_id == current_user.id) |
+        (models.StudentRating.student_id == current_user.id)
+    ).delete(synchronize_session=False)
+    db.query(models.Attendance).filter(
+        models.Attendance.student_id == current_user.id
+    ).delete(synchronize_session=False)
+    db.delete(current_user)
+    db.commit()
+
 @app.post("/users/me/password", response_model=schemas.UserResponse)
 async def change_password(
     passwords: schemas.UserPasswordUpdate,
@@ -482,6 +500,57 @@ async def create_lesson_homework(lesson_id: int, item: schemas.LessonItemCreate,
 async def get_lesson_activities(lesson_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     _require_lesson(lesson_id, db)
     return [_lesson_item_response(item) for item in db.query(models.LessonItem).filter(models.LessonItem.lesson_id == lesson_id, models.LessonItem.kind == "activity").all()]
+
+@app.post("/lessons/{lesson_id}/attendance", response_model=schemas.AttendanceResponse, status_code=201)
+async def create_attendance(
+    lesson_id: int,
+    attendance: schemas.AttendanceCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _require_teacher(current_user)
+    _require_lesson(lesson_id, db)
+    student = db.query(models.User).filter(models.User.id == attendance.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found.")
+    existing = db.query(models.Attendance).filter(
+        models.Attendance.lesson_id == lesson_id,
+        models.Attendance.student_id == attendance.student_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Attendance already recorded for this student.")
+    record = models.Attendance(lesson_id=lesson_id, **attendance.model_dump())
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+@app.get("/lessons/{lesson_id}/attendance", response_model=list[schemas.AttendanceResponse])
+async def get_lesson_attendance(
+    lesson_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _require_lesson(lesson_id, db)
+    return db.query(models.Attendance).filter(
+        models.Attendance.lesson_id == lesson_id
+    ).order_by(models.Attendance.student_id).all()
+
+@app.patch("/attendance/{attendance_id}", response_model=schemas.AttendanceResponse)
+async def update_attendance(
+    attendance_id: int,
+    update: schemas.AttendanceUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _require_teacher(current_user)
+    record = db.query(models.Attendance).filter(models.Attendance.id == attendance_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance record not found.")
+    record.status = update.status
+    db.commit()
+    db.refresh(record)
+    return record
 
 @app.post("/lessons/{lesson_id}/exam", response_model=schemas.LessonItemResponse, status_code=201)
 async def create_lesson_exam(lesson_id: int, item: schemas.LessonItemCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):

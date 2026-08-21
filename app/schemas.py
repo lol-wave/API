@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl, AliasPath
-from typing import Any
+from typing import Any, Literal
 from datetime import datetime
 
 # ============ User Schemas ============
@@ -141,6 +141,22 @@ class LessonItemResponse(BaseModel):
     url: str | None
     content: Any | None
     created_at: datetime
+    updated_at: datetime
+
+class AttendanceCreate(BaseModel):
+    student_id: int
+    status: Literal["present", "absent", "late"] = "present"
+
+class AttendanceUpdate(BaseModel):
+    status: Literal["present", "absent", "late"]
+
+class AttendanceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    lesson_id: int
+    student_id: int
+    status: Literal["present", "absent", "late"]
+    marked_at: datetime
     updated_at: datetime
 
 class StudentRatingCreate(BaseModel):

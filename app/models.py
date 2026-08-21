@@ -186,6 +186,24 @@ class Lesson(Base):
     group = relationship("Groups", back_populates="lessons")
     teacher = relationship("User", foreign_keys=[teacher_id])
     items = relationship("LessonItem", back_populates="lesson", cascade="all, delete-orphan")
+    attendance = relationship("Attendance", back_populates="lesson", cascade="all, delete-orphan")
+
+
+class Attendance(Base):
+    __tablename__ = "attendance"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "student_id", name="uq_attendance_lesson_student"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    lesson_id = Column(Integer, ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="present")
+    marked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    lesson = relationship("Lesson", back_populates="attendance")
+    student = relationship("User")
 
 
 class LessonItem(Base):
