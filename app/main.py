@@ -11,6 +11,7 @@ from fastapi import UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
+import json
 
 Base.metadata.create_all(bind=engine)
 add_missing_columns()
@@ -230,7 +231,19 @@ async def upload_avatar(
 @app.get("/object/{item_id}", response_model=schemas.ObjectResponse)
 async def get_single_object(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
     select_object= db.query(models.Objects).filter(models.Objects.id == item_id).first()
+    if not select_object:
+        raise HTTPException(status_code=404, detail="Object not found.")
     return select_object
+
+@app.delete("/object/{item_id}", status_code=204)
+async def delete_object(item_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not current_user.teacher:
+        raise HTTPException(status_code=403, detail="Only teachers can delete objects.")
+    select_object = db.query(models.Objects).filter(models.Objects.id == item_id).first()
+    if not select_object:
+        raise HTTPException(status_code=404, detail="Object not found.")
+    db.delete(select_object)
+    db.commit()
 
 @app.post("/object/{item_id}/submit", response_model=schemas.HomeworkSubmissionResponse, status_code=201)
 async def submit_object(
@@ -283,6 +296,24 @@ async def get_my_homework(
     ).order_by(
         models.HomeworkSubmission.submitted_at.desc()
     ).all()
+
+@app.get("/homework", response_model=list[schemas.MyHomeworkResponse])
+async def get_homework_alias(
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(models.HomeworkSubmission).filter(
+        models.HomeworkSubmission.student_id == current_user.id
+    ).order_by(models.HomeworkSubmission.submitted_at.desc()).all()
+
+@app.post("/homework/{homework_id}/submit", response_model=schemas.HomeworkSubmissionResponse, status_code=201)
+async def submit_homework_alias(
+    homework_id: int,
+    submission: schemas.ObjectSubmission,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return await submit_object(homework_id, submission, current_user, db)
 
 
 @app.get("/teacher/homework", response_model=list[schemas.HomeworkSubmissionResponse])
@@ -372,6 +403,97 @@ async def get_single_group(item_id: int, current_user: models.User = Depends(get
             detail="Group not found."
         )
     return select_group
+
+# ============ Lesson Endpoints ============
+
+def _lesson_item_response(item: models.LessonItem):
+    response = schemas.LessonItemResponse.model_validate(item)
+    if item.content is not None:
+        try:
+            response.content = json.loads(item.content)
+        except (TypeError, json.JSONDecodeError):
+            response.content = item.content
+    return response
+
+def _require_lesson(lesson_id: int, db: Session):
+    lesson = db.query(models.Lesson).filter(models.Lesson.id == lesson_id).first()
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found.")
+    return lesson
+
+def _require_teacher(current_user: models.User):
+    if not current_user.teacher:
+        raise HTTPException(status_code=403, detail="Only teachers can perform this action.")
+
+@app.post("/groups/{group_id}/lessons", response_model=schemas.LessonResponse, status_code=201)
+async def create_lesson(group_id: int, lesson: schemas.LessonCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    _require_teacher(current_user)
+    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found.")
+    new_lesson = models.Lesson(group_id=group_id, teacher_id=current_user.id, **lesson.model_dump())
+    db.add(new_lesson)
+    db.commit()
+    db.refresh(new_lesson)
+    return new_lesson
+
+@app.get("/groups/{group_id}/lessons", response_model=list[schemas.LessonResponse])
+async def get_group_lessons(group_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if not db.query(models.Groups).filter(models.Groups.id == group_id).first():
+        raise HTTPException(status_code=404, detail="Group not found.")
+    return db.query(models.Lesson).filter(models.Lesson.group_id == group_id).order_by(models.Lesson.starts_at).all()
+
+@app.get("/lessons/{lesson_id}", response_model=schemas.LessonResponse)
+async def get_lesson(lesson_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return _require_lesson(lesson_id, db)
+
+@app.patch("/lessons/{lesson_id}", response_model=schemas.LessonResponse)
+async def update_lesson(lesson_id: int, update: schemas.LessonUpdate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    _require_teacher(current_user)
+    lesson = _require_lesson(lesson_id, db)
+    for key, value in update.model_dump(exclude_unset=True).items():
+        setattr(lesson, key, value)
+    db.commit()
+    db.refresh(lesson)
+    return lesson
+
+@app.delete("/lessons/{lesson_id}", status_code=204)
+async def delete_lesson(lesson_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    _require_teacher(current_user)
+    lesson = _require_lesson(lesson_id, db)
+    db.delete(lesson)
+    db.commit()
+
+async def _create_lesson_item(lesson_id: int, kind: str, item: schemas.LessonItemCreate, db: Session, current_user: models.User):
+    _require_teacher(current_user)
+    _require_lesson(lesson_id, db)
+    content = json.dumps(item.content) if item.content is not None else None
+    new_item = models.LessonItem(lesson_id=lesson_id, kind=kind, title=item.title, description=item.description, url=item.url, content=content)
+    db.add(new_item)
+    db.commit()
+    db.refresh(new_item)
+    return _lesson_item_response(new_item)
+
+@app.post("/lessons/{lesson_id}/homework", response_model=schemas.LessonItemResponse, status_code=201)
+async def create_lesson_homework(lesson_id: int, item: schemas.LessonItemCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return await _create_lesson_item(lesson_id, "homework", item, db, current_user)
+
+@app.get("/lessons/{lesson_id}/activities", response_model=list[schemas.LessonItemResponse])
+async def get_lesson_activities(lesson_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    _require_lesson(lesson_id, db)
+    return [_lesson_item_response(item) for item in db.query(models.LessonItem).filter(models.LessonItem.lesson_id == lesson_id, models.LessonItem.kind == "activity").all()]
+
+@app.post("/lessons/{lesson_id}/exam", response_model=schemas.LessonItemResponse, status_code=201)
+async def create_lesson_exam(lesson_id: int, item: schemas.LessonItemCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return await _create_lesson_item(lesson_id, "exam", item, db, current_user)
+
+@app.post("/lessons/{lesson_id}/quiz", response_model=schemas.LessonItemResponse, status_code=201)
+async def create_lesson_quiz(lesson_id: int, item: schemas.LessonItemCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return await _create_lesson_item(lesson_id, "quiz", item, db, current_user)
+
+@app.post("/lessons/{lesson_id}/materials", response_model=schemas.LessonItemResponse, status_code=201)
+async def create_lesson_material(lesson_id: int, item: schemas.LessonItemCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return await _create_lesson_item(lesson_id, "materials", item, db, current_user)
 
 # ============ Group Management Endpoints ============
 
@@ -483,6 +605,44 @@ async def get_current_user_group(
         )
     
     return group
+
+@app.get("/me/groups", response_model=list[schemas.GroupResponse])
+async def get_current_user_groups(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if not current_user.group_id:
+        return []
+    return db.query(models.Groups).filter(models.Groups.id == current_user.group_id).all()
+
+@app.get("/teacher/students", response_model=list[schemas.UserResponse])
+async def get_teacher_students(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _require_teacher(current_user)
+    return db.query(models.User).filter(models.User.teacher == False).order_by(models.User.full_name).all()
+
+@app.get("/student/grades", response_model=list[schemas.HomeworkSubmissionResponse])
+async def get_student_grades(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.teacher:
+        raise HTTPException(status_code=403, detail="Only students can view student grades.")
+    return db.query(models.HomeworkSubmission).filter(
+        models.HomeworkSubmission.student_id == current_user.id,
+        models.HomeworkSubmission.grade.isnot(None)
+    ).order_by(models.HomeworkSubmission.graded_at.desc()).all()
+
+@app.get("/student/rating", response_model=list[schemas.StudentRatingResponse])
+async def get_student_ratings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    if current_user.teacher:
+        raise HTTPException(status_code=403, detail="Only students can view student ratings.")
+    return db.query(models.StudentRating).filter(models.StudentRating.student_id == current_user.id).order_by(models.StudentRating.updated_at.desc()).all()
 
 @app.patch("/group/{group_id}", response_model=schemas.GroupResponse)
 async def update_group(

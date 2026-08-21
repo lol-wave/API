@@ -166,7 +166,58 @@ class Groups(Base):
     )
     
     objects = relationship("Objects", back_populates="group", cascade="all, delete-orphan")
+    lessons = relationship("Lesson", back_populates="group", cascade="all, delete-orphan")
     members = relationship("User", back_populates="group", cascade="all")
+
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    starts_at = Column(DateTime, nullable=True)
+    ends_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    group = relationship("Groups", back_populates="lessons")
+    teacher = relationship("User", foreign_keys=[teacher_id])
+    items = relationship("LessonItem", back_populates="lesson", cascade="all, delete-orphan")
+
+
+class LessonItem(Base):
+    __tablename__ = "lesson_items"
+
+    id = Column(Integer, primary_key=True)
+    lesson_id = Column(Integer, ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(30), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    url = Column(String(2048), nullable=True)
+    content = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    lesson = relationship("Lesson", back_populates="items")
+
+
+class StudentRating(Base):
+    __tablename__ = "student_ratings"
+    __table_args__ = (UniqueConstraint("teacher_id", "student_id", name="uq_student_rating_teacher_student"),)
+
+    id = Column(Integer, primary_key=True)
+    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    score = Column(Integer, nullable=False)
+    feedback = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    teacher = relationship("User", foreign_keys=[teacher_id])
+    student = relationship("User", foreign_keys=[student_id])
 
 
 class Notification(Base):

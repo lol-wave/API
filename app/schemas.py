@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl, AliasPath
+from typing import Any
 from datetime import datetime
 
 # ============ User Schemas ============
@@ -94,11 +95,68 @@ class HomeworkSubmissionResponse(BaseModel):
     graded_at: datetime | None
 
 class MyHomeworkResponse(HomeworkSubmissionResponse):
-    homework: ObjectResponse
+    homework: ObjectResponse = Field(validation_alias=AliasPath("object"))
 
 class HomeworkGrade(BaseModel):
     grade: int = Field(..., ge=0, le=100)
     feedback: str | None = Field(None, max_length=2000)
+
+class LessonCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+class LessonUpdate(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+class LessonResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    title: str
+    description: str | None
+    group_id: int
+    teacher_id: int | None
+    starts_at: datetime | None
+    ends_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+class LessonItemCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: str | None = None
+    url: str | None = None
+    content: Any | None = None
+
+class LessonItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    lesson_id: int
+    kind: str
+    title: str
+    description: str | None
+    url: str | None
+    content: Any | None
+    created_at: datetime
+    updated_at: datetime
+
+class StudentRatingCreate(BaseModel):
+    student_id: int
+    score: int = Field(..., ge=1, le=5)
+    feedback: str | None = Field(None, max_length=2000)
+
+class StudentRatingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    teacher_id: int
+    student_id: int
+    score: int
+    feedback: str | None
+    created_at: datetime
+    updated_at: datetime
 
 # ============ Group Schemas ============
 class GroupCreate(BaseModel):

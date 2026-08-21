@@ -293,6 +293,40 @@ Response: 204 No Content
 
 ## OBJECT ENDPOINTS (Existing, Enhanced)
 
+## LESSON ENDPOINTS
+
+Lessons belong to a group. Teachers create, update, and delete lessons and lesson resources; authenticated users can read lessons in a group. Lesson resources are stored with a `kind` of `homework`, `activity`, `exam`, `quiz`, or `materials` and may include a URL or JSON content.
+
+```http
+POST /groups/{group_id}/lessons
+GET /groups/{group_id}/lessons
+GET /lessons/{lesson_id}
+PATCH /lessons/{lesson_id}
+DELETE /lessons/{lesson_id}
+
+POST /lessons/{lesson_id}/homework
+GET /lessons/{lesson_id}/activities
+POST /lessons/{lesson_id}/exam
+POST /lessons/{lesson_id}/quiz
+POST /lessons/{lesson_id}/materials
+```
+
+`POST` resource requests use `{ "title": "...", "description": "...", "url": "...", "content": {} }`. The `content` field is optional and accepts JSON.
+
+## STUDENT AND TEACHER ENDPOINTS
+
+```http
+GET /homework
+POST /homework/{homework_id}/submit
+GET /me/groups
+GET /student/rating
+GET /student/grades
+GET /teacher/students
+DELETE /object/{item_id}
+```
+
+`GET /homework` is the student homework alias, `/student/grades` returns graded homework submissions, `/student/rating` returns ratings assigned by teachers, and `/teacher/students` returns all student accounts. Object deletion and lesson mutation are teacher-only.
+
 ### Create Object (Teacher Only)
 
 ```http
