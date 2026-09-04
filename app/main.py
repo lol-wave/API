@@ -5,6 +5,7 @@ from .database import Base, engine, get_db, add_missing_columns
 from . import models
 from sqlalchemy.orm import Session
 from .security import check_teacher_secret_code, create_refresh_token, get_current_refresh_user, ph, create_access_token, get_current_user
+from .utils import generate_student_code
 import os
 import uuid
 from fastapi import UploadFile, File, Depends, HTTPException
@@ -46,10 +47,13 @@ async def register_user(user: schemas.UserRegister, db: Session = Depends(get_db
     detail="Email already registered."
 )
 
+    # Auto-generate student_code if not provided
+    student_code = user.student_code or generate_student_code(db)
+
     new_user = models.User(
         full_name=user.full_name,
         email=user.email,
-        student_code=user.student_code,
+        student_code=student_code,
         password_hash=ph.hash(user.password)
     )
     
@@ -71,10 +75,13 @@ async def register_teacher(user: schemas.TeacherRegister, db: Session = Depends(
     detail="Email already registered."
 )
 
+    # Auto-generate student_code if not provided
+    student_code = user.student_code or generate_student_code(db)
+
     new_user = models.User(
         full_name=user.full_name,
         email=user.email,
-        student_code=user.student_code,
+        student_code=student_code,
         password_hash=ph.hash(user.password),
         teacher=True
     )
