@@ -27,6 +27,12 @@ class User(Base):
         unique=True,
         nullable=False
     )
+    student_code = Column(
+        String(50),
+        unique=True,
+        nullable=True,
+        index=True
+    )
     password_hash = Column(
         String(255),
         nullable=False

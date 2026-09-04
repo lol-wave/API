@@ -6,11 +6,13 @@ from datetime import datetime
 class UserRegister(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
+    student_code: str | None = Field(None, min_length=3, max_length=50)
     password: str = Field(..., min_length=8, max_length=128)
 
 class TeacherRegister(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
+    student_code: str | None = Field(None, min_length=3, max_length=50)
     password: str = Field(..., min_length=8, max_length=128)
     teacher_secret_code: str | None = Field(None, min_length=6, max_length=6)
 
@@ -20,6 +22,7 @@ class UserResponse(BaseModel):
     id: int
     full_name: str
     email: EmailStr
+    student_code: str | None = None
     created_at: datetime
     teacher: bool
     group_id: int | None
@@ -55,6 +58,7 @@ class UserMemberResponse(BaseModel):
     id: int
     full_name: str
     email: EmailStr
+    student_code: str | None = None
     profile_pic: str | None = None
     is_group_admin: bool
     created_at: datetime
@@ -144,7 +148,9 @@ class LessonItemResponse(BaseModel):
     updated_at: datetime
 
 class AttendanceCreate(BaseModel):
-    student_id: int
+    student_id: int | None = None
+    student_code: str | None = Field(None, min_length=3, max_length=50)
+    email: EmailStr | None = None
     status: Literal["present", "absent", "late"] = "present"
 
 class AttendanceUpdate(BaseModel):
@@ -205,7 +211,9 @@ class GroupUpdate(BaseModel):
     description: str | None = Field(None, max_length=255)
 
 class AddUserToGroupRequest(BaseModel):
-    user_id: int
+    user_id: int | None = None
+    student_code: str | None = Field(None, min_length=3, max_length=50)
+    email: EmailStr | None = None
 
 # ============ Notification Schemas ============
 class NotificationCreate(BaseModel):

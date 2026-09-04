@@ -49,6 +49,7 @@ async def register_user(user: schemas.UserRegister, db: Session = Depends(get_db
     new_user = models.User(
         full_name=user.full_name,
         email=user.email,
+        student_code=user.student_code,
         password_hash=ph.hash(user.password)
     )
     
@@ -73,6 +74,7 @@ async def register_teacher(user: schemas.TeacherRegister, db: Session = Depends(
     new_user = models.User(
         full_name=user.full_name,
         email=user.email,
+        student_code=user.student_code,
         password_hash=ph.hash(user.password),
         teacher=True
     )
@@ -501,6 +503,26 @@ async def get_lesson_activities(lesson_id: int, db: Session = Depends(get_db), c
     _require_lesson(lesson_id, db)
     return [_lesson_item_response(item) for item in db.query(models.LessonItem).filter(models.LessonItem.lesson_id == lesson_id, models.LessonItem.kind == "activity").all()]
 
+@app.delete("/lessons/{lesson_id}/homework/{item_id}", status_code=204)
+async def delete_lesson_homework_item(
+    lesson_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    _require_teacher(current_user)
+    _require_lesson(lesson_id, db)
+
+    item = db.query(models.LessonItem).filter(
+        models.LessonItem.id == item_id,
+        models.LessonItem.lesson_id == lesson_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Lesson homework item not found.")
+
+    db.delete(item)
+    db.commit()
+
 @app.post("/lessons/{lesson_id}/attendance", response_model=schemas.AttendanceResponse, status_code=201)
 async def create_attendance(
     lesson_id: int,
@@ -510,16 +532,33 @@ async def create_attendance(
 ):
     _require_teacher(current_user)
     _require_lesson(lesson_id, db)
-    student = db.query(models.User).filter(models.User.id == attendance.student_id).first()
+
+    student_id = attendance.student_id
+    if student_id is None:
+        if attendance.student_code:
+            student = db.query(models.User).filter(models.User.student_code == attendance.student_code).first()
+            if not student:
+                raise HTTPException(status_code=404, detail="Student not found.")
+            student_id = student.id
+        elif attendance.email:
+            student = db.query(models.User).filter(models.User.email == attendance.email).first()
+            if not student:
+                raise HTTPException(status_code=404, detail="Student not found.")
+            student_id = student.id
+        else:
+            raise HTTPException(status_code=400, detail="A student identifier is required.")
+
+    student = db.query(models.User).filter(models.User.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found.")
     existing = db.query(models.Attendance).filter(
         models.Attendance.lesson_id == lesson_id,
-        models.Attendance.student_id == attendance.student_id
+        models.Attendance.student_id == student_id
     ).first()
     if existing:
         raise HTTPException(status_code=409, detail="Attendance already recorded for this student.")
-    record = models.Attendance(lesson_id=lesson_id, **attendance.model_dump())
+    payload = attendance.model_dump(exclude={"student_id", "student_code", "email"})
+    record = models.Attendance(lesson_id=lesson_id, student_id=student_id, **payload)
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -579,31 +618,38 @@ async def add_user_to_group(
             status_code=403,
             detail="Only teachers can add users to groups."
         )
-    
+
     group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
     if not group:
         raise HTTPException(
             status_code=404,
             detail="Group not found."
         )
-    
-    user = db.query(models.User).filter(models.User.id == request.user_id).first()
+
+    user = None
+    if request.user_id is not None:
+        user = db.query(models.User).filter(models.User.id == request.user_id).first()
+    elif request.student_code:
+        user = db.query(models.User).filter(models.User.student_code == request.student_code).first()
+    elif request.email:
+        user = db.query(models.User).filter(models.User.email == request.email).first()
+
     if not user:
         raise HTTPException(
             status_code=404,
             detail="User not found."
         )
-    
+
     if user.group_id == group_id:
         raise HTTPException(
             status_code=409,
             detail="User is already in this group."
         )
-    
+
     user.group_id = group_id
     db.commit()
     db.refresh(user)
-    
+
     return user
 
 @app.delete("/group/{group_id}/members/{user_id}", status_code=204)

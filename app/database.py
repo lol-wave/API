@@ -20,13 +20,20 @@ SessionLocal = sessionmaker(
 def add_missing_columns():
     """Add columns introduced after the initial database creation."""
     inspector = inspect(engine)
-    if "objects" not in inspector.get_table_names():
-        return
+    tables = set(inspector.get_table_names())
 
-    object_columns = {column["name"] for column in inspector.get_columns("objects")}
-    if "homework_url" not in object_columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE objects ADD COLUMN homework_url VARCHAR(2048)"))
+    if "objects" in tables:
+        object_columns = {column["name"] for column in inspector.get_columns("objects")}
+        if "homework_url" not in object_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE objects ADD COLUMN homework_url VARCHAR(2048)"))
+
+    if "users" in tables:
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        if "student_code" not in user_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE users ADD COLUMN student_code VARCHAR(50)"))
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_student_code ON users (student_code)"))
 
 def get_db():
     db = SessionLocal()
