@@ -6,13 +6,11 @@ from datetime import datetime
 class UserRegister(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
-    student_code: str | None = Field(None, min_length=3, max_length=50)
     password: str = Field(..., min_length=8, max_length=128)
 
 class TeacherRegister(BaseModel):
     full_name: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
-    student_code: str | None = Field(None, min_length=3, max_length=50)
     password: str = Field(..., min_length=8, max_length=128)
     teacher_secret_code: str | None = Field(None, min_length=6, max_length=6)
 

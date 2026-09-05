@@ -47,13 +47,10 @@ async def register_user(user: schemas.UserRegister, db: Session = Depends(get_db
     detail="Email already registered."
 )
 
-    # Auto-generate student_code if not provided
-    student_code = user.student_code or generate_student_code(db)
-
     new_user = models.User(
         full_name=user.full_name,
         email=user.email,
-        student_code=student_code,
+        student_code=generate_student_code(db),
         password_hash=ph.hash(user.password)
     )
     
@@ -75,13 +72,10 @@ async def register_teacher(user: schemas.TeacherRegister, db: Session = Depends(
     detail="Email already registered."
 )
 
-    # Auto-generate student_code if not provided
-    student_code = user.student_code or generate_student_code(db)
-
     new_user = models.User(
         full_name=user.full_name,
         email=user.email,
-        student_code=student_code,
+        student_code=generate_student_code(db),
         password_hash=ph.hash(user.password),
         teacher=True
     )
