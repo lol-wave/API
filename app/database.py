@@ -35,6 +35,13 @@ def add_missing_columns():
                 connection.execute(text("ALTER TABLE users ADD COLUMN student_code VARCHAR(50)"))
                 connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_student_code ON users (student_code)"))
 
+    if "notifications" in tables:
+        notification_columns = {column["name"] for column in inspector.get_columns("notifications")}
+        if "created_by_id" not in notification_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE notifications ADD COLUMN created_by_id INTEGER"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_notifications_created_by_id ON notifications (created_by_id)"))
+
 def get_db():
     db = SessionLocal()
     try:

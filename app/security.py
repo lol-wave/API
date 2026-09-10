@@ -69,7 +69,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
-def get_current_refresh_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_refresh_user(token: str | None, db: Session):
+    if not token:
+        raise HTTPException(status_code=401, detail="Refresh token is required.")
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:

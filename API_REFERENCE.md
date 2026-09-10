@@ -350,6 +350,7 @@ PATCH /lessons/{lesson_id}
 DELETE /lessons/{lesson_id}
 
 POST /lessons/{lesson_id}/homework
+POST /lessons/{lesson_id}/activities
 GET /lessons/{lesson_id}/activities
 POST /lessons/{lesson_id}/exam
 POST /lessons/{lesson_id}/quiz

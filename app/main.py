@@ -102,7 +102,7 @@ async def login_user(user: schemas.UserLogin, response: Response, db: Session = 
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
         samesite="lax",
         max_age=30 * 24 * 60 * 60
     )
@@ -161,7 +161,7 @@ async def change_password(
     current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if not ph.verify(passwords.current_password, current_user.password_hash):
+    if not ph.verify(passwords.old_password, current_user.password_hash):
         raise HTTPException(
             status_code=401,
             detail="Current password is incorrect."
@@ -173,7 +173,7 @@ async def change_password(
     return current_user
 
 @app.post("/refresh", response_model=schemas.AccessToken)
-async def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends(get_db)):
+async def refresh_token(refresh_token: str | None = Cookie(None), db: Session = Depends(get_db)):
     current_user = get_current_refresh_user(refresh_token, db)
     access_token = create_access_token({"sub": str(current_user.id)})
 
@@ -499,6 +499,10 @@ async def _create_lesson_item(lesson_id: int, kind: str, item: schemas.LessonIte
 async def create_lesson_homework(lesson_id: int, item: schemas.LessonItemCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     return await _create_lesson_item(lesson_id, "homework", item, db, current_user)
 
+@app.post("/lessons/{lesson_id}/activities", response_model=schemas.LessonItemResponse, status_code=201)
+async def create_lesson_activity(lesson_id: int, item: schemas.LessonItemCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    return await _create_lesson_item(lesson_id, "activity", item, db, current_user)
+
 @app.get("/lessons/{lesson_id}/activities", response_model=list[schemas.LessonItemResponse])
 async def get_lesson_activities(lesson_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     _require_lesson(lesson_id, db)
@@ -667,6 +671,13 @@ async def remove_user_from_group(
             detail="Only teachers can remove users from groups."
         )
     
+    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
+    if not group:
+        raise HTTPException(
+            status_code=404,
+            detail="Group not found."
+        )
+
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(
@@ -920,7 +931,8 @@ async def create_notification(
         title=notification.title,
         description=notification.description,
         notification_type=notification.notification_type,
-        icon_url=notification.icon_url
+        icon_url=notification.icon_url,
+        created_by_id=current_user.id
     )
     
     db.add(new_notification)
@@ -953,7 +965,8 @@ async def create_bulk_notification(
         title=notification.title,
         description=notification.description,
         notification_type=notification.notification_type,
-        icon_url=notification.icon_url
+        icon_url=notification.icon_url,
+        created_by_id=current_user.id
     )
     
     db.add(new_notification)
@@ -1032,6 +1045,18 @@ async def get_unread_notification_count(
     
     return {"unread_count": unread_count}
 
+def _notification_response(notification: models.Notification, is_read: bool = False, read_at=None):
+    return {
+        "id": notification.id,
+        "title": notification.title,
+        "description": notification.description,
+        "notification_type": notification.notification_type,
+        "icon_url": notification.icon_url,
+        "is_read": is_read,
+        "read_at": read_at,
+        "created_at": notification.created_at
+    }
+
 @app.patch("/notifications/{notification_id}", response_model=schemas.UserNotificationResponse)
 async def mark_notification_as_read(
     notification_id: int,
@@ -1053,7 +1078,8 @@ async def mark_notification_as_read(
         models.user_notifications.c.notification_id == notification_id
     ).first()
     
-    if not user_notif:
+    is_owner = current_user.teacher and notification.created_by_id == current_user.id
+    if not user_notif and not is_owner:
         raise HTTPException(
             status_code=404,
             detail="User does not have access to this notification."
@@ -1071,30 +1097,14 @@ async def mark_notification_as_read(
     db.commit()
     
     # Fetch updated notification
-    updated_notif = db.query(
-        models.Notification,
-        models.user_notifications.c.is_read,
-        models.user_notifications.c.read_at
-    ).join(
-        models.user_notifications,
-        models.Notification.id == models.user_notifications.c.notification_id
-    ).filter(
-        models.user_notifications.c.user_id == current_user.id,
-        models.Notification.id == notification_id
-    ).first()
-    
-    notification, is_read_value, read_at = updated_notif
-    
-    return {
-        'id': notification.id,
-        'title': notification.title,
-        'description': notification.description,
-        'notification_type': notification.notification_type,
-        'icon_url': notification.icon_url,
-        'is_read': is_read_value,
-        'read_at': read_at,
-        'created_at': notification.created_at
-    }
+    if user_notif:
+        user_notif = db.query(models.user_notifications).filter(
+            models.user_notifications.c.user_id == current_user.id,
+            models.user_notifications.c.notification_id == notification_id
+        ).first()
+        return _notification_response(notification, user_notif.is_read, user_notif.read_at)
+
+    return _notification_response(notification)
 
 @app.delete("/notifications/{notification_id}", status_code=204)
 async def delete_notification_for_user(
@@ -1110,6 +1120,16 @@ async def delete_notification_for_user(
             detail="Notification not found."
         )
     
+    is_owner = current_user.teacher and notification.created_by_id == current_user.id
+
+    if is_owner:
+        db.query(models.user_notifications).filter(
+            models.user_notifications.c.notification_id == notification_id
+        ).delete()
+        db.delete(notification)
+        db.commit()
+        return
+
     # Remove user from notification's users
     user_notif = db.query(models.user_notifications).filter(
         models.user_notifications.c.user_id == current_user.id,

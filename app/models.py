@@ -252,6 +252,7 @@ class Notification(Base):
     description = Column(Text, nullable=True)
     notification_type = Column(String(50), nullable=False, default="info")  # info, warning, error, success
     icon_url = Column(String, nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     
     created_at = Column(
         DateTime,

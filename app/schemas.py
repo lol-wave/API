@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl, AliasPath
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, HttpUrl, AliasPath, AliasChoices
 from typing import Any, Literal
 from datetime import datetime
 
@@ -46,7 +46,12 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
 
 class UserPasswordUpdate(BaseModel):
-    current_password: str = Field(..., min_length=8, max_length=128)
+    old_password: str = Field(
+        ...,
+        min_length=8,
+        max_length=128,
+        validation_alias=AliasChoices("old_password", "current_password")
+    )
     new_password: str = Field(..., min_length=8, max_length=128)
 
 class UserMemberResponse(BaseModel):
@@ -146,7 +151,10 @@ class LessonItemResponse(BaseModel):
     updated_at: datetime
 
 class AttendanceCreate(BaseModel):
-    student_id: int | None = None
+    student_id: int | None = Field(
+        None,
+        validation_alias=AliasChoices("user_id", "student_id")
+    )
     student_code: str | None = Field(None, min_length=3, max_length=50)
     email: EmailStr | None = None
     status: Literal["present", "absent", "late"] = "present"
