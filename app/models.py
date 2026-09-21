@@ -60,7 +60,12 @@ class User(Base):
         onupdate=datetime.utcnow
     )
 
-    group = relationship("Groups", back_populates="members", foreign_keys=[group_id])
+    group = relationship(
+        "Groups",
+        back_populates="members",
+        foreign_keys=[group_id],
+        primaryjoin="User.group_id == Groups.id"
+    )
     
     notifications = relationship(
         "Notification",
@@ -150,6 +155,7 @@ class Groups(Base):
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True)
+    teacher_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     name = Column(
         String(100),
         unique=True,
@@ -173,7 +179,13 @@ class Groups(Base):
     
     objects = relationship("Objects", back_populates="group", cascade="all, delete-orphan")
     lessons = relationship("Lesson", back_populates="group", cascade="all, delete-orphan")
-    members = relationship("User", back_populates="group", cascade="all")
+    members = relationship(
+        "User",
+        back_populates="group",
+        cascade="all",
+        foreign_keys="User.group_id",
+        primaryjoin="Groups.id == User.group_id"
+    )
 
 
 class Lesson(Base):

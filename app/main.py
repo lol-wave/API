@@ -188,6 +188,12 @@ async def add_object(object: schemas.ObjectCreate, db: Session = Depends(get_db)
             status_code=403,
             detail="Only teachers can add objects."
         )
+
+    group = db.query(models.Groups).filter(models.Groups.id == object.group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found.")
+    if group.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to add assignments to this group.")
     
     if existing_object:
         raise HTTPException(
@@ -210,8 +216,14 @@ async def add_object(object: schemas.ObjectCreate, db: Session = Depends(get_db)
 
 @app.get("/objects", response_model=list[schemas.ObjectResponse])
 async def get_objects(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    objects = db.query(models.Objects).all()
-    return objects
+    if current_user.teacher:
+        teacher_group_ids = _teacher_group_ids(db, current_user)
+        if not teacher_group_ids:
+            return []
+        return db.query(models.Objects).filter(models.Objects.group_id.in_(teacher_group_ids)).order_by(models.Objects.created_at.desc()).all()
+    if not current_user.group_id:
+        return []
+    return db.query(models.Objects).filter(models.Objects.group_id == current_user.group_id).order_by(models.Objects.created_at.desc()).all()
 
 @app.post("/users/me/avatar", response_model=schemas.UserResponse)
 async def upload_avatar(
@@ -251,9 +263,14 @@ async def upload_avatar(
 
 @app.get("/object/{item_id}", response_model=schemas.ObjectResponse)
 async def get_single_object(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
-    select_object= db.query(models.Objects).filter(models.Objects.id == item_id).first()
+    select_object = db.query(models.Objects).filter(models.Objects.id == item_id).first()
     if not select_object:
         raise HTTPException(status_code=404, detail="Object not found.")
+    if current_user.teacher:
+        if select_object.group_id not in _teacher_group_ids(db, current_user):
+            raise HTTPException(status_code=403, detail="You do not have permission to view this assignment.")
+    elif current_user.group_id != select_object.group_id:
+        raise HTTPException(status_code=403, detail="You do not have permission to view this assignment.")
     return select_object
 
 @app.delete("/object/{item_id}", status_code=204)
@@ -263,6 +280,9 @@ async def delete_object(item_id: int, current_user: models.User = Depends(get_cu
     select_object = db.query(models.Objects).filter(models.Objects.id == item_id).first()
     if not select_object:
         raise HTTPException(status_code=404, detail="Object not found.")
+    group = db.query(models.Groups).filter(models.Groups.id == select_object.group_id).first()
+    if not group or group.teacher_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this assignment.")
     db.delete(select_object)
     db.commit()
 
@@ -283,6 +303,11 @@ async def submit_object(
         raise HTTPException(
             status_code=403,
             detail="Only students can submit homework."
+        )
+    if current_user.group_id != select_object.group_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only submit homework for your own group."
         )
     existing_submission = db.query(models.HomeworkSubmission).filter(
         models.HomeworkSubmission.object_id == item_id,
@@ -348,7 +373,14 @@ async def get_homework_submissions(
             detail="Only teachers can view homework submissions."
         )
 
-    return db.query(models.HomeworkSubmission).order_by(
+    teacher_group_ids = _teacher_group_ids(db, current_user)
+    if not teacher_group_ids:
+        return []
+
+    return db.query(models.HomeworkSubmission).join(
+        models.Objects,
+        models.HomeworkSubmission.object_id == models.Objects.id
+    ).filter(models.Objects.group_id.in_(teacher_group_ids)).order_by(
         models.HomeworkSubmission.submitted_at.desc()
     ).all()
 
@@ -374,6 +406,9 @@ async def grade_homework(
             status_code=404,
             detail="Homework submission not found."
         )
+    object_record = db.query(models.Objects).filter(models.Objects.id == homework_submission.object_id).first()
+    if not object_record or object_record.group_id not in _teacher_group_ids(db, current_user):
+        raise HTTPException(status_code=403, detail="You do not have permission to grade this submission.")
 
     homework_submission.grade = grading.grade
     homework_submission.feedback = grading.feedback
@@ -401,7 +436,8 @@ async def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db)
 
     new_group = models.Groups(
         name=group.name,
-        description=group.description
+        description=group.description,
+        teacher_id=current_user.id
     )
     
     db.add(new_group)
@@ -412,17 +448,15 @@ async def create_group(group: schemas.GroupCreate, db: Session = Depends(get_db)
 
 @app.get("/groups", response_model=list[schemas.GroupResponse])
 async def get_groups(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    groups = db.query(models.Groups).all()
-    return groups
+    if current_user.teacher:
+        return db.query(models.Groups).filter(models.Groups.teacher_id == current_user.id).order_by(models.Groups.name).all()
+    if not current_user.group_id:
+        return []
+    return db.query(models.Groups).filter(models.Groups.id == current_user.group_id).all()
 
 @app.get("/group/{item_id}", response_model=schemas.GroupDetailResponse)
 async def get_single_group(item_id: int, current_user: models.User = Depends(get_current_user), db : Session = Depends(get_db)):
-    select_group = db.query(models.Groups).filter(models.Groups.id == item_id).first()
-    if not select_group:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found."
-        )
+    select_group = _require_group_access(item_id, current_user, db)
     return select_group
 
 # ============ Lesson Endpoints ============
@@ -446,12 +480,33 @@ def _require_teacher(current_user: models.User):
     if not current_user.teacher:
         raise HTTPException(status_code=403, detail="Only teachers can perform this action.")
 
-@app.post("/groups/{group_id}/lessons", response_model=schemas.LessonResponse, status_code=201)
-async def create_lesson(group_id: int, lesson: schemas.LessonCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    _require_teacher(current_user)
+
+def _teacher_group_ids(db: Session, current_user: models.User) -> list[int]:
+    if not current_user.teacher:
+        return []
+    return [group_id for (group_id,) in db.query(models.Groups.id).filter(models.Groups.teacher_id == current_user.id).all()]
+
+
+def _require_group_access(group_id: int, current_user: models.User, db: Session, *, allow_member: bool = True):
     group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found.")
+
+    if current_user.teacher:
+        if group.teacher_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this group.")
+        return group
+
+    if allow_member and current_user.group_id == group_id:
+        return group
+
+    raise HTTPException(status_code=403, detail="You do not have permission to access this group.")
+
+
+@app.post("/groups/{group_id}/lessons", response_model=schemas.LessonResponse, status_code=201)
+async def create_lesson(group_id: int, lesson: schemas.LessonCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    _require_teacher(current_user)
+    group = _require_group_access(group_id, current_user, db)
     new_lesson = models.Lesson(group_id=group_id, teacher_id=current_user.id, **lesson.model_dump())
     db.add(new_lesson)
     db.commit()
@@ -460,8 +515,7 @@ async def create_lesson(group_id: int, lesson: schemas.LessonCreate, db: Session
 
 @app.get("/groups/{group_id}/lessons", response_model=list[schemas.LessonResponse])
 async def get_group_lessons(group_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if not db.query(models.Groups).filter(models.Groups.id == group_id).first():
-        raise HTTPException(status_code=404, detail="Group not found.")
+    group = _require_group_access(group_id, current_user, db)
     return db.query(models.Lesson).filter(models.Lesson.group_id == group_id).order_by(models.Lesson.starts_at).all()
 
 @app.get("/lessons/{lesson_id}", response_model=schemas.LessonResponse)
@@ -624,12 +678,7 @@ async def add_user_to_group(
             detail="Only teachers can add users to groups."
         )
 
-    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found."
-        )
+    group = _require_group_access(group_id, current_user, db)
 
     user = None
     if request.user_id is not None:
@@ -671,12 +720,7 @@ async def remove_user_from_group(
             detail="Only teachers can remove users from groups."
         )
     
-    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found."
-        )
+    group = _require_group_access(group_id, current_user, db)
 
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
@@ -702,13 +746,7 @@ async def get_group_members(
     current_user: models.User = Depends(get_current_user)
 ):
     """Get all members of a group"""
-    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found."
-        )
-    
+    group = _require_group_access(group_id, current_user, db)
     members = db.query(models.User).filter(models.User.group_id == group_id).all()
     return members
 
@@ -748,7 +786,13 @@ async def get_teacher_students(
     current_user: models.User = Depends(get_current_user)
 ):
     _require_teacher(current_user)
-    return db.query(models.User).filter(models.User.teacher == False).order_by(models.User.full_name).all()
+    teacher_group_ids = _teacher_group_ids(db, current_user)
+    if not teacher_group_ids:
+        return []
+    return db.query(models.User).filter(
+        models.User.teacher == False,
+        models.User.group_id.in_(teacher_group_ids)
+    ).order_by(models.User.full_name).all()
 
 @app.get("/student/grades", response_model=list[schemas.HomeworkSubmissionResponse])
 async def get_student_grades(
@@ -784,13 +828,8 @@ async def update_group(
             status_code=403,
             detail="Only teachers can update groups."
         )
-    
-    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found."
-        )
+
+    group = _require_group_access(group_id, current_user, db)
     
     if update.name is not None:
         existing_group = db.query(models.Groups).filter(
@@ -823,13 +862,8 @@ async def delete_group(
             status_code=403,
             detail="Only teachers can delete groups."
         )
-    
-    group = db.query(models.Groups).filter(models.Groups.id == group_id).first()
-    if not group:
-        raise HTTPException(
-            status_code=404,
-            detail="Group not found."
-        )
+
+    group = _require_group_access(group_id, current_user, db)
     
     db.delete(group)
     db.commit()

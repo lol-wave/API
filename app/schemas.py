@@ -195,6 +195,7 @@ class GroupResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    teacher_id: int | None = None
     name: str
     description: str | None
     created_at: datetime
@@ -205,6 +206,7 @@ class GroupDetailResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
     id: int
+    teacher_id: int | None = None
     name: str
     description: str | None
     members: list[UserMemberResponse] = []
