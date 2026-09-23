@@ -1,23 +1,74 @@
-from fastapi import Depends, FastAPI, HTTPException, Response, Cookie, UploadFile, File
-from . import schemas
+import os
+import smtplib
+import uuid
+import json
+import secrets
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+
+from fastapi import Depends, FastAPI, HTTPException, Response, Cookie, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from .database import Base, engine, get_db, add_missing_columns
-from . import models
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+
+from . import schemas
+from .database import Base, engine, get_db, add_missing_columns
+from . import models
 from .security import check_teacher_secret_code, create_refresh_token, get_current_refresh_user, ph, create_access_token, get_current_user
 from .utils import generate_student_code
-import os
-import uuid
-from fastapi import UploadFile, File, Depends, HTTPException
-from fastapi.staticfiles import StaticFiles
-from datetime import datetime
-import json
 
 Base.metadata.create_all(bind=engine)
 add_missing_columns()
 
 app = FastAPI()
+
+PASSWORD_RESET_RATE_LIMIT_WINDOW = timedelta(minutes=10)
+PASSWORD_RESET_RATE_LIMIT_MAX_REQUESTS = 3
+PASSWORD_RESET_TOKEN_TTL = timedelta(minutes=60)
+PASSWORD_RESET_ATTEMPTS: dict[str, list[datetime]] = {}
+
+
+def _password_reset_attempts_for_email(email: str) -> list[datetime]:
+    normalized_email = email.strip().lower()
+    if normalized_email not in PASSWORD_RESET_ATTEMPTS:
+        PASSWORD_RESET_ATTEMPTS[normalized_email] = []
+    attempts = PASSWORD_RESET_ATTEMPTS[normalized_email]
+    cutoff = datetime.now(timezone.utc) - PASSWORD_RESET_RATE_LIMIT_WINDOW
+    attempts[:] = [attempt for attempt in attempts if attempt >= cutoff]
+    return attempts
+
+
+def _send_password_reset_email(recipient_email: str, raw_token: str) -> None:
+    frontend_url = os.getenv("FRONTEND_URL", "").rstrip("/")
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = os.getenv("SMTP_PORT")
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    email_from = os.getenv("EMAIL_FROM")
+
+    if not frontend_url or not smtp_host or not smtp_user or not smtp_password or not email_from:
+        return
+
+    reset_link = f"{frontend_url}/reset-password?token={raw_token}"
+    msg = EmailMessage()
+    msg["Subject"] = "Reset your password"
+    msg["From"] = email_from
+    msg["To"] = recipient_email
+    msg.set_content(
+        "Use the following link to reset your password: "
+        f"{reset_link}"
+    )
+
+    try:
+        with smtplib.SMTP(smtp_host, int(smtp_port or 587)) as server:
+            if smtp_host.lower() not in {"localhost"}:
+                server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+    except Exception:
+        return
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -135,6 +186,76 @@ async def login_user(user: schemas.UserLogin, response: Response, db: Session = 
 
     return {"access_token": access_token, "token_type": "bearer"}
 
+
+@app.post("/forgot-password")
+async def forgot_password(
+    payload: schemas.ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    attempts = _password_reset_attempts_for_email(payload.email)
+    if len(attempts) >= PASSWORD_RESET_RATE_LIMIT_MAX_REQUESTS:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many password reset attempts. Please try again later.",
+        )
+
+    attempts.append(datetime.now(timezone.utc))
+
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if user:
+        raw_token = secrets.token_urlsafe(32)
+        db.add(
+            models.PasswordResetToken(
+                user_id=user.id,
+                token_hash=ph.hash(raw_token),
+                expires_at=datetime.now(timezone.utc) + PASSWORD_RESET_TOKEN_TTL,
+            )
+        )
+        db.commit()
+        background_tasks.add_task(_send_password_reset_email, user.email, raw_token)
+
+    return {"message": "If that email exists, a reset link has been sent."}
+
+
+@app.post("/reset-password")
+async def reset_password(
+    payload: schemas.PasswordResetRequest,
+    db: Session = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+    tokens = db.query(models.PasswordResetToken).filter(
+        models.PasswordResetToken.expires_at > now,
+        models.PasswordResetToken.used_at.is_(None),
+    ).all()
+
+    matched_token = None
+    for token_record in tokens:
+        try:
+            if ph.verify(payload.token, token_record.token_hash):
+                matched_token = token_record
+                break
+        except Exception:
+            continue
+
+    if not matched_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Reset link is invalid or has expired.",
+        )
+
+    user = db.query(models.User).filter(models.User.id == matched_token.user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=400,
+            detail="Reset link is invalid or has expired.",
+        )
+
+    user.password_hash = ph.hash(payload.new_password)
+    matched_token.used_at = now
+    db.commit()
+
+    return {"message": "Password has been reset."}
 
 
 @app.get("/me", response_model=schemas.UserResponse)

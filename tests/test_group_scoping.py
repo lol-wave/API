@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_group_scoping.db"
 os.environ["SECRET_KEY"] = "test-secret-key"
@@ -132,3 +133,63 @@ def test_login_with_invalid_password_hash_returns_401():
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid email or password."
+
+
+def test_forgot_password_generic_response_and_rate_limit():
+    with TestingSessionLocal() as db:
+        user = models.User(
+            full_name="Reset User",
+            email="reset@example.com",
+            password_hash=main_module.ph.hash("OriginalPass123"),
+            teacher=False,
+        )
+        db.add(user)
+        db.commit()
+
+    response = client.post("/forgot-password", json={"email": "missing@example.com"})
+    assert response.status_code == 200
+    assert response.json() == {"message": "If that email exists, a reset link has been sent."}
+
+    for _ in range(3):
+        response = client.post("/forgot-password", json={"email": "reset@example.com"})
+        assert response.status_code == 200
+
+    response = client.post("/forgot-password", json={"email": "reset@example.com"})
+    assert response.status_code == 429
+    assert "detail" in response.json()
+
+
+def test_reset_password_success_and_rejects_used_token():
+    with TestingSessionLocal() as db:
+        user = models.User(
+            full_name="Token User",
+            email="tokenuser@example.com",
+            password_hash=main_module.ph.hash("old-password-123"),
+            teacher=False,
+        )
+        db.add(user)
+        db.commit()
+
+        raw_token = "reset-token-1234567890"
+        db.add(
+            models.PasswordResetToken(
+                user_id=user.id,
+                token_hash=main_module.ph.hash(raw_token),
+                expires_at=datetime.utcnow() + timedelta(minutes=60),
+            )
+        )
+        db.commit()
+
+    response = client.post(
+        "/reset-password",
+        json={"token": raw_token, "new_password": "newPass456"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"message": "Password has been reset."}
+
+    response = client.post(
+        "/reset-password",
+        json={"token": raw_token, "new_password": "newPass4567"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Reset link is invalid or has expired."}
