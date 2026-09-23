@@ -4,12 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from .database import Base, engine, get_db, add_missing_columns
 from . import models
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from .security import check_teacher_secret_code, create_refresh_token, get_current_refresh_user, ph, create_access_token, get_current_user
 from .utils import generate_student_code
 import os
 import uuid
 from fastapi import UploadFile, File, Depends, HTTPException
-from sqlalchemy.orm import Session
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 import json
@@ -53,10 +53,17 @@ async def register_user(user: schemas.UserRegister, db: Session = Depends(get_db
         student_code=generate_student_code(db),
         password_hash=ph.hash(user.password)
     )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Email already registered or a database conflict prevented account creation."
+        )
 
     return new_user 
 
@@ -79,22 +86,41 @@ async def register_teacher(user: schemas.TeacherRegister, db: Session = Depends(
         password_hash=ph.hash(user.password),
         teacher=True
     )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Email already registered or a database conflict prevented account creation."
+        )
 
     return new_user 
 
 @app.post("/login", response_model=schemas.Token)
 async def login_user(user: schemas.UserLogin, response: Response, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    
-    if not db_user or not ph.verify(user.password, db_user.password_hash):
+
+    if not db_user or not db_user.password_hash:
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password."
         )
+
+    try:
+        password_valid = ph.verify(user.password, db_user.password_hash)
+    except Exception:
+        password_valid = False
+
+    if not password_valid:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password."
+        )
+
     access_token = create_access_token({"sub": str(db_user.id)})
     refresh_token = create_refresh_token({"sub": str(db_user.id)})
 

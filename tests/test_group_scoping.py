@@ -112,3 +112,23 @@ def test_other_teacher_cannot_update_group():
     main_module.app.dependency_overrides[main_module.get_current_user] = fake_current_user
     response = client.patch("/group/{group_id}".format(group_id=group_id), json={"name": "Hacked"})
     assert response.status_code == 403
+
+
+def test_login_with_invalid_password_hash_returns_401():
+    with TestingSessionLocal() as db:
+        user = models.User(
+            full_name="Broken Hash",
+            email="broken@example.com",
+            password_hash="not-a-valid-password-hash",
+            teacher=False,
+        )
+        db.add(user)
+        db.commit()
+
+    response = client.post(
+        "/login",
+        json={"email": "broken@example.com", "password": "any-password"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid email or password."
